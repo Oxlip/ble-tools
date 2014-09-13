@@ -2,6 +2,7 @@
 
 import logging
 import ubledriver
+import time
 
 
 def main():
@@ -12,9 +13,10 @@ def main():
         logging.error('Unable to get driver')
         return
 
-    while True:
-        packet = driver.run()
-        driver.send_umsg(None)
+    packet = driver.run()
+    driver.send_umsg(None)
+
+    time.sleep(220)
 
 if __name__ == '__main__':
     main()
