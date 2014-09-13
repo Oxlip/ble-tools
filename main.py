@@ -1,19 +1,20 @@
 #!/bin/env python
 
 import logging
-import ublereader
+import ubledriver
 
 
 def main():
-    reader = ublereader.uBleReader()
-    reader.open()
+    driver = ubledriver.uBleDriver()
+    driver.init()
 
-    if not reader.is_open():
-        logging.error('Unable to get reader')
+    if not driver.is_init():
+        logging.error('Unable to get driver')
         return
 
     while True:
-        packet = reader.receiv_packet()
+        packet = driver.run()
+        driver.send_umsg(None)
 
 if __name__ == '__main__':
     main()

@@ -1,57 +1,27 @@
 import os
 import sys
 import struct
-import ureader
+import udriver
 import logging
+import datahelper
 import socket
 import ctypes
 import ctypes.util
 
-class DataParser(object):
+class uBlePacketSend(datahelper.DataWriter):
 
-    def __init__(self, data):
-        self.data = data
-        self.pos  = 0
+    def __init__(self, umsg):
+        super(uBlePacketSend, self).__init__()
+        self.umsg = umsg
 
-    def get_ubyte(self):
-        (res,) = struct.unpack('>B', self.data[self.pos : self.pos + 1])
-        self.pos += 1
-        return res
-
-    def get_ushort(self):
-        (res,) = struct.unpack('>H', self.data[self.pos : self.pos + 2])
-        self.pos += 2
-        return res
-
-    def get_uint(self):
-        (res,) = struct.unpack('>I', self.data[self.pos : self.pos + 4])
-        self.pos += 4
-        return res
-
-    def get_int(self):
-        (res,) = struct.unpack('>i', self.data[self.pos : self.pos + 4])
-        self.pos += 4
-        return res
-
-    def get_data(self, size):
-        res = self.data[self.pos : self.pos + size]
-        self.pos += size
-        return res
-
-    def get_mac(self):
-        mac = []
-        for count in range(6):
-           mac.insert(0, self.get_ubyte())
-        return mac
-
-class uBlePacket(DataParser):
+class uBlePacketRecv(datahelper.DataReader):
 
     event_types = {
         0x3e : 'le_meta'
     }
 
     def __init__(self, raw):
-        super(uBlePacket, self).__init__(raw)
+        super(uBlePacketRecv, self).__init__(raw)
         self._parse()
 
     def _call(self, msg):
@@ -72,9 +42,8 @@ class uBlePacket(DataParser):
                 data_type = self.get_ubyte()
                 data      = self.get_data(data_len - 1)
                 self.get_ubyte()
-                print '[{type}][{len}][{data}]'.format(data = data,
-                                                       type = data_type,
-                                                       len  = data_len)
+                macstr = ':'.join(chr(c).encode('hex') for c in mac)
+                print '[LE adv][{mac}][{data}]'.format(data = data, mac = macstr)
         else:
             logging.error('LE meta sub event not impl %x',
                           self.sub_event)
@@ -94,9 +63,16 @@ class uBlePacket(DataParser):
             return
 
         self._call(self.event_types[self.event_type])
-        
 
-class uBleReader(ureader.uReader):
+    def get_mac(self):
+        mac = []
+        for count in range(6):
+           mac.insert(0, self.get_ubyte())
+        return mac
+
+    
+
+class uBleDriver(udriver.uDriver):
 
     _hci_filter = struct.pack("<IQH",
                               0x00000010,
@@ -104,9 +80,9 @@ class uBleReader(ureader.uReader):
                               0)
 
     def __init__(self):
-        super(uBleReader, self).__init__('uBleReader')
+        super(uBleDriver, self).__init__('uBleReader')
 
-    def open(self):
+    def init(self):
         btlib = ctypes.util.find_library('bluetooth')
         if not btlib:
             logging.error('Need to install \'bluez\' lib')
@@ -146,16 +122,14 @@ class uBleReader(ureader.uReader):
             logging.error('Unable to run the scani: %s',
                           os.strerror(errnum))
             return
-        self._is_open = True
+        self._is_init = True
 
-    def close(self):
-        pass
-
-    def receiv_packet(self):
-        if not self.is_open():
+    def run(self):
+        if not self.is_init():
             logging.error('receiv_packet: blereader not open')
             return
-        blepacket = uBlePacket(self._sock.recv(1024))
+        #should be running in thread/gevent
+        blepacket = uBlePacketRecv(self._sock.recv(1024))
 
-    def send_packet(self, upacket):
-        pass
+    def send_umsg(self, umsg):
+        blepacket = uBlePacketSend(umsg)
