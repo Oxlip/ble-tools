@@ -20,6 +20,10 @@ class DataWriter(object):
     def set_data(self, data):
         self.data += data
 
+    def send(self):
+        self.sender.send(self.data)
+        self.data = ''
+
 class DataReader(object):
 
     def __init__(self, data):
@@ -51,4 +55,5 @@ class DataReader(object):
         self.pos += size
         return res
 
-
+    def get_len(self):
+        return len(self.data) - self.pos

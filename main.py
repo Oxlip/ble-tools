@@ -16,7 +16,5 @@ def main():
     packet = driver.run()
     driver.send_umsg(None)
 
-    time.sleep(220)
-
 if __name__ == '__main__':
     main()
