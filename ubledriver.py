@@ -10,6 +10,44 @@ import thread
 import time
 import ctypes.util
 
+
+class BleUUID(object):
+
+    UUID_BUTTON = '\x00\x00\x15\x24\x12\x12\xef\xde\x15\x23\x78\x5f\xea\xbc\xd1\x23'
+    UUID_DEVINCE_NAME = 0x2A00
+
+    knowed_uuid = {
+        UUID_DEVINCE_NAME : 'UUID_DEVINCE_NAME',
+        UUID_BUTTON       : 'UUID_BUTTON'
+    }
+
+    def __init__(self, raw):
+        self.raw = raw
+
+    def is_know(self):
+        return self.raw in self.knowed_uuid
+
+    def __repr__(self):
+        if self.is_know():
+            return self.knowed_uuid[self.raw]
+        try:
+            len(self.raw)
+            uuidt = []
+            uuidd = datahelper.DataReader(self.raw)
+            for count in range(len(self.raw) / 2):
+                uuidt.append(uuidd.get_ushort())
+            uuid_fmt = '{0:04X}{1:04X}-{2:04X}-{3:04X}-{4:04X}-{5:04X}{6:04X}{7:04X}'
+            return uuid_fmt.format(uuidt[0],
+                                   uuidt[1],
+                                   uuidt[2],
+                                   uuidt[3],
+                                   uuidt[4],
+                                   uuidt[5],
+                                   uuidt[6],
+                                   uuidt[7])
+        except:
+            return '{uuid}'.format(uuid = hex(self.raw))
+
 class uBleType(object):
 
     PKT_TYPE_HCI_CMD       = 0x1
@@ -18,18 +56,19 @@ class uBleType(object):
 
 class uBlePacketSend(datahelper.DataWriter):
 
-    def write(self, handle, handle_target, value):
+    def write_ubyte_value(self, handle, handle_target, value):
         self.set_ubyte(0x02)
         self.set_ushort(handle)
-        self.set_ushort(9)
-        self.set_ushort(5)
+        self.set_ushort(8)
+        self.set_ushort(4)
         self.set_ushort(4)
         self.set_ubyte(0x12)
         self.set_ushort(handle_target)
-        self.set_ushort(1)
+        self.set_ubyte(value)
         self.send()
+        time.sleep(2)
 
-    def get_charrac(self, handle, char_handle):
+    def read_value(self, handle, char_handle):
         self.set_ubyte(0x02)
         self.set_ushort(handle)
         self.set_ushort(7)
@@ -37,52 +76,61 @@ class uBlePacketSend(datahelper.DataWriter):
         self.set_ushort(4)
         self.set_ubyte(0xa)
         self.set_ushort(char_handle)
+
+        res = {}
+        res['ended'] = None
+        res['value'] = None
+
+        def result(packet, data):
+            if packet.opcode == 0xb:
+                data['value'] = packet.value
+            data['ended'] = True
+
+        self.driver.register_handle(handle,
+                                    result,
+                                    res)
+
         self.send()
 
-    def find_info(self, handle):
+        while res['ended'] is None:
+            time.sleep(1)
+
+        return res['value']
+
+    def get_char_for_group(self, handle, begin, end):
         self.set_ubyte(0x02)
         self.set_ushort(handle)
-        self.set_ushort(9)
-        self.set_ushort(5)
+
+        param = datahelper.DataWriter()
+        param.set_ubyte(0x8)
+        param.set_ushort(begin)
+        param.set_ushort(end)
+        param.set_ushort(0x2803)
+
+        self.set_ushort(len(param.data) + 4)
+        self.set_ushort(len(param.data))
         self.set_ushort(4)
-        self.set_ubyte(0x4)
-        self.set_ushort(0x0009)
-        self.set_ushort(0xffff)
+        self.set_data(param.data)
+
+        res = {}
+        res['ended'] = None
+        res['result'] = []
+
+        def result(packet, data):
+            if packet.opcode == 0x9:
+                data['result'].append(packet.attributes)
+            data['ended'] = True
+
+        self.driver.register_handle(handle,
+                                    result,
+                                    res)
+
         self.send()
 
-    def get_charrac_dec(self, handle, char_handle):
-        self.set_ubyte(0x02)
-        self.set_ushort(handle)
-        self.set_ushort(11)
-        self.set_ushort(7)
-        self.set_ushort(4)
-        self.set_ubyte(0xa)
-        self.set_ushort(char_handle)
-        self.set_ushort(0x2901)
-        self.sock.send(self.data)
-        self.data = ''
+        while res['ended'] is None:
+            time.sleep(1)
 
-    def get_charrac_gatt(self, handle):
-        self.set_ubyte(0x02)
-        self.set_ushort(handle)
-        self.set_ushort(11)
-        self.set_ushort(7)
-        self.set_ushort(4)
-        self.set_ubyte(0x8)
-        self.set_ushort(0x0001)
-        self.set_ushort(0xffff)
-        self.set_ushort(0x2803)
-        self.sock.send(self.data)
-        self.data = ''
-
-    def get_service(self, handle, handle_target):
-        self.set_ubyte(0x02)
-        self.set_ushort(handle)
-        self.set_ushort(9)
-        self.set_ushort(5)
-        self.set_ushort(4)
-        self.set_ubyte(0x8)
-        self.set_ushort(handle_target)
+        return res['result']
 
 
     def disconnect(self, handle):
@@ -198,7 +246,9 @@ class uBlePacketRecv(datahelper.DataReader):
     }
 
     packet_types = {
-        0x11 : 'read_by_group'
+        0x11 : 'read_by_group',
+        0x09 : 'read_by_type',
+        0x0b : 'read'
     }
 
     def __init__(self, raw, driver):
@@ -263,11 +313,40 @@ class uBlePacketRecv(datahelper.DataReader):
         self.cid = self.get_ushort()
         self.opcode = self.get_ubyte()
 
-        if not self.opcode in self.packet_types:
+        if self.opcode == 0x01:
+            self._driver.notify_handle_status(self.handle, self)
+            return
+        elif not self.opcode in self.packet_types:
             logging.error('Opcode %s not implemented', hex(self.opcode))
             return
 
+
         self._call(self.packet_types[self.opcode])
+
+
+    def _parse_read(self):
+        self.value_len = self.data_len - 1
+        self.value = self.get_data(self.value_len)
+        self._driver.notify_handle_status(self.handle, self)
+
+
+    def _parse_read_by_type(self):
+        self.att_len = self.get_ubyte()
+        self.attributes = []
+        while self.get_len() >= self.att_len:
+           handle = self.get_ushort()
+           value  = self.get_data(self.att_len - 2)
+           value = datahelper.DataReader(value)
+           data   = {
+               'flags' : value.get_ubyte(),
+               'handle': value.get_ushort()
+           }
+           if self.att_len == 7:
+               data['uuid'] = BleUUID(value.get_ushort())
+           else:
+               data['uuid'] = BleUUID(value.get_data(self.att_len - 5)[::-1])
+           self.attributes.append((handle, data))
+        self._driver.notify_handle_status(self.handle, self)
 
 
     def _parse_read_by_group(self):
@@ -359,6 +438,9 @@ class uBleDriver(udriver.uDriver):
 
 
     def notify_handle_status(self, handle, packet):
+        if handle not in self._handle_waiting:
+            logging.info('recv status %x for %x, but nobody have register')
+            return
         callback, data = self._handle_waiting[handle]
         del self._handle_waiting[handle]
         thread.start_new_thread(callback, (packet, data))
@@ -387,6 +469,28 @@ class uBleDriver(udriver.uDriver):
         result  = blepacket.connect()
         if not result:
             return
-        services = blepacket.get_services(result['handle'])
-        print services
+
+        try:
+            gp_services = blepacket.get_services(result['handle'])
+
+            for services  in gp_services:
+                for begin, end, value in services:
+                    chars = blepacket.get_char_for_group(result['handle'],
+                                                         begin,
+                                                         end)
+                    if len(chars) == 0:
+                        continue
+                    for _, char in chars[0]:
+                        if char['uuid'].is_know():
+                            value = blepacket.read_value(result['handle'],
+                                                         char['handle'])
+                            logging.warning('{uuid}: {value}'.format(uuid = char['uuid'],
+                                                                     value = value))
+                            if char['uuid'].raw == BleUUID.UUID_BUTTON:
+                                blepacket.write_ubyte_value(result['handle'],
+                                                            char['handle'],
+                                                            1)
+        except Exception, e:
+            logging.exception(e)
+
         blepacket.disconnect(result['handle'])
