@@ -14,11 +14,13 @@ import ctypes.util
 class BleUUID(object):
 
     UUID_BUTTON = '\x00\x00\x15\x24\x12\x12\xef\xde\x15\x23\x78\x5f\xea\xbc\xd1\x23'
+    UUID_LED    = '\x00\x00\x15\x25\x12\x12\xef\xde\x15\x23\x78\x5f\xea\xbc\xd1\x23'
     UUID_DEVINCE_NAME = 0x2A00
 
     knowed_uuid = {
         UUID_DEVINCE_NAME : 'UUID_DEVINCE_NAME',
-        UUID_BUTTON       : 'UUID_BUTTON'
+        UUID_BUTTON       : 'UUID_BUTTON',
+        UUID_LED          : 'UUID_LED'
     }
 
     def __init__(self, raw):
@@ -97,7 +99,7 @@ class uBlePacketSend(datahelper.DataWriter):
 
         return res['value']
 
-    def get_char_for_group(self, handle, begin, end):
+    def get_char_for_group(self, handle, begin, end, uuid = 0x2803):
         self.set_ubyte(0x02)
         self.set_ushort(handle)
 
@@ -105,7 +107,10 @@ class uBlePacketSend(datahelper.DataWriter):
         param.set_ubyte(0x8)
         param.set_ushort(begin)
         param.set_ushort(end)
-        param.set_ushort(0x2803)
+        if uuid == 0x2803:
+            param.set_ushort(0x2803)
+        else:
+            param.set_data(uuid[::-1])
 
         self.set_ushort(len(param.data) + 4)
         self.set_ushort(len(param.data))
@@ -140,6 +145,7 @@ class uBlePacketSend(datahelper.DataWriter):
         self.set_ushort(handle)
         self.set_ubyte(0x13)
         self.send()
+
 
     def get_services(self, handle, hfrom = 0x0001):
         self.set_ubyte(0x02)
@@ -299,7 +305,7 @@ class uBlePacketRecv(datahelper.DataReader):
         self.param_len  = self.get_ubyte()
 
         if not self.event_type in self.event_types:
-            logging.error('Event %s not implemented', hex(self.event_type))
+            logging.info('Event %s not implemented', hex(self.event_type))
             return
 
         self._call(self.event_types[self.event_type])
@@ -336,16 +342,7 @@ class uBlePacketRecv(datahelper.DataReader):
         while self.get_len() >= self.att_len:
            handle = self.get_ushort()
            value  = self.get_data(self.att_len - 2)
-           value = datahelper.DataReader(value)
-           data   = {
-               'flags' : value.get_ubyte(),
-               'handle': value.get_ushort()
-           }
-           if self.att_len == 7:
-               data['uuid'] = BleUUID(value.get_ushort())
-           else:
-               data['uuid'] = BleUUID(value.get_data(self.att_len - 5)[::-1])
-           self.attributes.append((handle, data))
+           self.attributes.append((handle, value))
         self._driver.notify_handle_status(self.handle, self)
 
 
@@ -413,6 +410,23 @@ class uBleDriver(udriver.uDriver):
 #   Callback from recv packets
 ###############################################################################
 
+    def value_to_char_fmt(self, value_raw):
+
+        att_len = len(value_raw)
+
+        value = datahelper.DataReader(value_raw)
+        data   = {
+            'flags' : value.get_ubyte(),
+            'handle': value.get_ushort()
+        }
+        if value.get_len() == 2:
+            data['uuid'] = BleUUID(value.get_ushort())
+        else:
+            data['uuid'] = BleUUID(value.get_data(value.get_len())[::-1])
+
+        return data
+
+
     def new_client(self, mac, name):
         if name in self._clients:
             return
@@ -460,6 +474,41 @@ class uBleDriver(udriver.uDriver):
     def run(self):
         thread.start_new_thread(self._run, (1, 1))
 
+    def _act_discovery(self, result, blepacket):
+        gp_services = blepacket.get_services(result['handle'])
+
+        for services  in gp_services:
+            for begin, end, value in services:
+                chars = blepacket.get_char_for_group(result['handle'],
+                                                     begin,
+                                                     end)
+                if len(chars) == 0:
+                    continue
+                for _, char in chars[0]:
+                    char = self.value_to_char_fmt(char)
+                    if char['uuid'].is_know():
+                        value = blepacket.read_value(result['handle'],
+                                                     char['handle'])
+                        logging.warning('{uuid}: {value}'.format(uuid = char['uuid'],
+                                                                 value = value))
+                        if char['uuid'].raw == BleUUID.UUID_LED:
+                            blepacket.write_ubyte_value(result['handle'],
+                                                        char['handle'],
+                                                        1)
+                            time.sleep(2)
+                            blepacket.write_ubyte_value(result['handle'],
+                                                        char['handle'],
+                                                        0)
+
+    def _act_led(self, umsg, result, blepacket):
+        led = blepacket.get_char_for_group(result['handle'],
+                                           0x0001,
+                                           0xFFFF,
+                                           uuid = BleUUID.UUID_LED)
+        blepacket.write_ubyte_value(result['handle'],
+                                    led[0][0][0],
+                                    1)
+        time.sleep(2)
 
     def send_umsg(self, umsg):
         blepacket = uBlePacketSend(umsg,
@@ -471,25 +520,11 @@ class uBleDriver(udriver.uDriver):
             return
 
         try:
-            gp_services = blepacket.get_services(result['handle'])
+            if umsg['action'] == 'disc':
+                self._act_discovery(result, blepacket)
 
-            for services  in gp_services:
-                for begin, end, value in services:
-                    chars = blepacket.get_char_for_group(result['handle'],
-                                                         begin,
-                                                         end)
-                    if len(chars) == 0:
-                        continue
-                    for _, char in chars[0]:
-                        if char['uuid'].is_know():
-                            value = blepacket.read_value(result['handle'],
-                                                         char['handle'])
-                            logging.warning('{uuid}: {value}'.format(uuid = char['uuid'],
-                                                                     value = value))
-                            if char['uuid'].raw == BleUUID.UUID_BUTTON:
-                                blepacket.write_ubyte_value(result['handle'],
-                                                            char['handle'],
-                                                            1)
+            if umsg['action'] == 'led':
+                self._act_led(umsg, result, blepacket)
         except Exception, e:
             logging.exception(e)
 

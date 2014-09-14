@@ -14,7 +14,11 @@ def main():
         return
 
     packet = driver.run()
-    driver.send_umsg(None)
+
+#    umsg = { 'action' : 'disc' }
+    umsg = { 'action' : 'led', 'on' : True }
+
+    driver.send_umsg(umsg)
 
 if __name__ == '__main__':
     main()
