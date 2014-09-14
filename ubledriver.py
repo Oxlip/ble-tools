@@ -323,7 +323,7 @@ class uBlePacketRecv(datahelper.DataReader):
             self._driver.notify_handle_status(self.handle, self)
             return
         elif not self.opcode in self.packet_types:
-            logging.error('Opcode %s not implemented', hex(self.opcode))
+            logging.info('Opcode %s not implemented', hex(self.opcode))
             return
 
 
