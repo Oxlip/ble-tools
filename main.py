@@ -17,7 +17,8 @@ def main():
     packet = driver.run()
 
 #    umsg = { 'action' : 'disc' }
-    umsg = { 'action' : 'led', 'on' : True }
+    umsg = { 'action' : 'infos' }
+#    umsg = { 'action' : 'led', 'on' : True }
 
     driver.send_umsg(umsg)
 

@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import struct
 import udriver
 import logging
@@ -15,12 +16,16 @@ class BleUUID(object):
 
     UUID_BUTTON = '\x00\x00\x15\x24\x12\x12\xef\xde\x15\x23\x78\x5f\xea\xbc\xd1\x23'
     UUID_LED    = '\x00\x00\x15\x25\x12\x12\xef\xde\x15\x23\x78\x5f\xea\xbc\xd1\x23'
+    UUID_DFU_PACKET = '\x00\x00\x15\x32\x12\x12\xEF\xDE\x15\x23\x78\x5F\xEA\xBC\xD1\x23'
+    UUID_DFU_CONTROLE = '\x00\x00\x15\x31\x12\x12\xEF\xDE\x15\x23\x78\x5F\xEA\xBC\xD1\x23'
     UUID_DEVINCE_NAME = 0x2A00
 
     knowed_uuid = {
         UUID_DEVINCE_NAME : 'UUID_DEVINCE_NAME',
         UUID_BUTTON       : 'UUID_BUTTON',
-        UUID_LED          : 'UUID_LED'
+        UUID_LED          : 'UUID_LED',
+        UUID_DFU_PACKET   : 'UUID_DFU_PACKET',
+        UUID_DFU_CONTROLE : 'UUID_DFU_CONTROLE'
     }
 
     def __init__(self, raw):
@@ -70,6 +75,40 @@ class uBlePacketSend(datahelper.DataWriter):
         self.send()
         time.sleep(2)
 
+    def find_info(self, handle, hfrom = 0x0001):
+        self.set_ubyte(0x02)
+        self.set_ushort(handle)
+        self.set_ushort(9)
+        self.set_ushort(5)
+        self.set_ushort(4)
+        self.set_ubyte(0x4)
+        self.set_ushort(hfrom)
+        self.set_ushort(0xffff)
+
+        res = {}
+        res['ended'] = None
+        res['attributes'] = []
+
+        def result(packet, data):
+            if packet.opcode == 0x5:
+                data['attributes'] += packet.attributes
+                data['attributes'] += self.find_info(packet.handle, packet.attributes[-1][0] + 1)
+            data['ended'] = True
+
+        self.driver.register_handle(handle,
+                                    result,
+                                    res)
+
+        self.send()
+
+        while res['ended'] is None:
+            time.sleep(.1)
+
+        return res['attributes']
+
+
+
+
     def read_value(self, handle, char_handle):
         self.set_ubyte(0x02)
         self.set_ushort(handle)
@@ -95,7 +134,7 @@ class uBlePacketSend(datahelper.DataWriter):
         self.send()
 
         while res['ended'] is None:
-            time.sleep(1)
+            time.sleep(.1)
 
         return res['value']
 
@@ -133,7 +172,7 @@ class uBlePacketSend(datahelper.DataWriter):
         self.send()
 
         while res['ended'] is None:
-            time.sleep(1)
+            time.sleep(.1)
 
         return res['result']
 
@@ -178,7 +217,7 @@ class uBlePacketSend(datahelper.DataWriter):
         self.send()
 
         while res['ended'] is None:
-            time.sleep(1)
+            time.sleep(.1)
 
         return res['result']
 
@@ -254,7 +293,8 @@ class uBlePacketRecv(datahelper.DataReader):
     packet_types = {
         0x11 : 'read_by_group',
         0x09 : 'read_by_type',
-        0x0b : 'read'
+        0x0b : 'read',
+        0x05 : 'find_info'
     }
 
     def __init__(self, raw, driver):
@@ -335,6 +375,17 @@ class uBlePacketRecv(datahelper.DataReader):
         self.value = self.get_data(self.value_len)
         self._driver.notify_handle_status(self.handle, self)
 
+    def _parse_find_info(self):
+        self.uuid_type = self.get_ubyte()
+        self.attributes = []
+        while self.get_len() != 0:
+            handle = self.get_ushort()
+            if self.uuid_type == 0x1:
+                uuid = BleUUID(self.get_ushort())
+            else:
+                uuid = BleUUID(self.get_data(16)[::-1])
+            self.attributes.append((handle, uuid))
+        self._driver.notify_handle_status(self.handle, self)
 
     def _parse_read_by_type(self):
         self.att_len = self.get_ubyte()
@@ -510,6 +561,35 @@ class uBleDriver(udriver.uDriver):
                                     1)
         time.sleep(2)
 
+
+    def _act_infos(self, umsg, result, blepacket):
+        infos = blepacket.find_info(result['handle'])
+
+        board = { 'services' : [] }
+
+        service = None
+
+        for info in infos:
+            infojson = { 'handle' : info[0], 'uuid' : repr(info[1]) }
+            if info[1].raw == 0x2800:
+                if service is not None:
+                    board['services'].append(service)
+                infojson['char'] = []
+                service = infojson
+                char = None
+            elif info[1].raw == 0x2803:
+                service['char'].append(infojson)
+                char = infojson
+                char['value'] = None
+                char['desc'] = []
+            elif info[1].raw == 0x2902:
+                char['desc'].append(infojson)
+            else:
+                char['value'] = infojson
+        board['services'].append(service)
+        print json.dumps(board, sort_keys=True, indent=4)
+
+
     def send_umsg(self, umsg):
         blepacket = uBlePacketSend(umsg,
                                    [ 0xea, 0x2a, 0xc2, 0x72, 0xed, 0x89 ],
@@ -525,6 +605,9 @@ class uBleDriver(udriver.uDriver):
 
             if umsg['action'] == 'led':
                 self._act_led(umsg, result, blepacket)
+
+            if umsg['action'] == 'infos':
+                self._act_infos(umsg, result, blepacket)
         except Exception, e:
             logging.exception(e)
 
