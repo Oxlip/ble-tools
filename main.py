@@ -2,7 +2,7 @@
 
 import tools
 import logging
-import ubledriver
+from  udriver import ubledriver
 import time
 
 
@@ -17,10 +17,11 @@ def main():
     packet = driver.run()
 
 #    umsg = { 'action' : 'disc' }
-    umsg = { 'action' : 'infos' }
+    umsg = { 'dest_id' : '#fake_serial', 'action' : 'infos' }
 #    umsg = { 'action' : 'led', 'on' : True }
 
-    driver.send_umsg(umsg)
+    if not driver.send_umsg(umsg):
+        logging.error('Unable to found dest %s', umsg['dest_id'])
 
 if __name__ == '__main__':
     main()

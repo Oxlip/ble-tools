@@ -11,7 +11,6 @@ import thread
 import time
 import ctypes.util
 
-
 class BleUUID(object):
 
     UUID_BUTTON = '\x00\x00\x15\x24\x12\x12\xef\xde\x15\x23\x78\x5f\xea\xbc\xd1\x23'
@@ -54,6 +53,11 @@ class BleUUID(object):
                                    uuidt[7])
         except:
             return '{uuid}'.format(uuid = hex(self.raw))
+
+class uBleDest(object):
+
+    def __init__(self, mac):
+        self.mac = mac
 
 class uBleType(object):
 
@@ -590,14 +594,30 @@ class uBleDriver(udriver.uDriver):
         print json.dumps(board, sort_keys=True, indent=4)
 
 
+    _dest_available = {
+        '#fake_serial' : uBleDest([ 0xea, 0x2a, 0xc2, 0x72, 0xed, 0x89 ])
+    }
+
+    def _get_dest_info(self, dest_id):
+        if not dest_id in self._dest_available:
+            return None
+        return self._dest_available[dest_id]
+
     def send_umsg(self, umsg):
+
+        dest_info = self._get_dest_info(umsg['dest_id'])
+        if dest_info is None:
+            return False
+
+        addr_mac = dest_info.mac
+
         blepacket = uBlePacketSend(umsg,
-                                   [ 0xea, 0x2a, 0xc2, 0x72, 0xed, 0x89 ],
+                                   addr_mac,
                                    self._sock,
                                    self)
         result  = blepacket.connect()
         if not result:
-            return
+            return False
 
         try:
             if umsg['action'] == 'disc':
@@ -612,3 +632,4 @@ class uBleDriver(udriver.uDriver):
             logging.exception(e)
 
         blepacket.disconnect(result['handle'])
+        return True
