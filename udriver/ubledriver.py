@@ -4,6 +4,7 @@ import json
 import struct
 import udriver
 import logging
+import progressbar
 import datahelper
 import socket
 import ctypes
@@ -67,17 +68,59 @@ class uBleType(object):
 
 class uBlePacketSend(datahelper.DataWriter):
 
-    def write_ubyte_value(self, handle, handle_target, value):
+    def write_ubyte_value(self, handle, handle_target, value, write_type = 0x12):
         self.set_ubyte(0x02)
         self.set_ushort(handle)
         self.set_ushort(8)
         self.set_ushort(4)
         self.set_ushort(4)
-        self.set_ubyte(0x12)
+        self.set_ubyte(write_type)
         self.set_ushort(handle_target)
         self.set_ubyte(value)
         self.send()
-        time.sleep(2)
+        if write_type == 0x12:
+            time.sleep(2)
+
+    def write_ushort_value(self, handle, handle_target, value, write_type = 0x12):
+        self.set_ubyte(0x02)
+        self.set_ushort(handle)
+        self.set_ushort(9)
+        self.set_ushort(5)
+        self.set_ushort(4)
+        self.set_ubyte(write_type)
+        self.set_ushort(handle_target)
+        self.set_ushort(value)
+        self.send()
+        if write_type == 0x12:
+            time.sleep(1)
+
+    def write_uint_value(self, handle, handle_target, value, write_type = 0x12):
+        self.set_ubyte(0x02)
+        self.set_ushort(handle)
+        self.set_ushort(11)
+        self.set_ushort(7)
+        self.set_ushort(4)
+        self.set_ubyte(write_type)
+        self.set_ushort(handle_target)
+        self.set_uint(value)
+        self.send()
+        if write_type == 0x12:
+            time.sleep(1)
+
+
+    def write_data_value(self, handle, handle_target, value, write_type = 0x12):
+        self.set_ubyte(0x02)
+        self.set_ushort(handle)
+        self.set_ushort(len(value) + 7)
+        self.set_ushort(len(value) + 3)
+        self.set_ushort(4)
+        self.set_ubyte(write_type)
+        self.set_ushort(handle_target)
+        self.set_data(value)
+        self.send()
+        if write_type == 0x12:
+            time.sleep(1)
+
 
     def find_info(self, handle, hfrom = 0x0001):
         self.set_ubyte(0x02)
@@ -142,7 +185,7 @@ class uBlePacketSend(datahelper.DataWriter):
 
         return res['value']
 
-    def get_char_for_group(self, handle, begin, end, uuid = 0x2803):
+    def get_char_for_group(self, handle, begin, end, uuid = 0x2803, get_err = False):
         self.set_ubyte(0x02)
         self.set_ushort(handle)
 
@@ -167,6 +210,8 @@ class uBlePacketSend(datahelper.DataWriter):
         def result(packet, data):
             if packet.opcode == 0x9:
                 data['result'].append(packet.attributes)
+            elif get_err:
+                data['result'] = packet
             data['ended'] = True
 
         self.driver.register_handle(handle,
@@ -327,6 +372,7 @@ class uBlePacketRecv(datahelper.DataReader):
                                            self.status,
                                            self)
         elif self.sub_event == 0x02:
+            data = ''
             num_report = self.get_ubyte()
             for rep_n in range(num_report):
                 ev_type   = self.get_ubyte()
@@ -334,8 +380,9 @@ class uBlePacketRecv(datahelper.DataReader):
                 mac       = self.get_mac()
                 ev_len    = self.get_ubyte()
                 data_len  = self.get_ubyte()
-                data_type = self.get_ubyte()
-                data      = self.get_data(data_len - 1)
+                if data_len != 0:
+                    data_type = self.get_ubyte()
+                    data      = self.get_data(data_len - 1)
                 self.get_ubyte()
                 self._driver.new_client(mac, data)
         else:
@@ -364,6 +411,9 @@ class uBlePacketRecv(datahelper.DataReader):
         self.opcode = self.get_ubyte()
 
         if self.opcode == 0x01:
+            self._driver.notify_handle_status(self.handle, self)
+            return
+        elif self.opcode == 0x1B:
             self._driver.notify_handle_status(self.handle, self)
             return
         elif not self.opcode in self.packet_types:
@@ -418,7 +468,7 @@ class uBlePacketRecv(datahelper.DataReader):
         elif pkt_type == 0x02:
             self._parse_packet()
         else:
-            logging.error('Recv packet non hci event')
+            logging.info('Recv packet non hci event')
             return
 
     def get_mac(self):
@@ -603,6 +653,178 @@ class uBleDriver(udriver.uDriver):
             return None
         return self._dest_available[dest_id]
 
+    def _act_dfu(self, umsg, result, blepacket):
+        time.sleep(1)
+        handle = result['handle']
+        dfu_ctrl = blepacket.get_char_for_group(result['handle'],
+                                                0x0001,
+                                                0xFFFF,
+                                                uuid = BleUUID.UUID_DFU_CONTROLE,
+                                                get_err = True)
+        dfu_pkt = blepacket.get_char_for_group(result['handle'],
+                                               0x0001,
+                                               0xFFFF,
+                                               uuid = BleUUID.UUID_DFU_PACKET,
+                                               get_err = True)
+
+        # We are not able to read, but the handle is in error responce :)
+        dfu_pkt.get_ubyte()
+        dfu_pkt_handle = dfu_pkt.get_ushort()
+        dfu_ctrl.get_ubyte()
+        dfu_ctrl_handle = dfu_ctrl.get_ushort()
+
+        # Enable notification
+        blepacket.write_ushort_value(handle, dfu_ctrl_handle + 1, 0x0001)
+
+        # Setup wait for notification
+        res = {}
+        res['received'] = None
+        def wait_for_notif(packet, data):
+            data['handle'] = packet.get_ushort()
+            data['reqoc'] = packet.get_ubyte()
+            data['repoc'] = packet.get_ubyte()
+            data['value'] = packet.get_ubyte()
+            if packet.get_len() == 1:
+                data['data'] = packet.get_ubyte()
+            elif packet.get_len() == 2:
+                data['data'] = packet.get_ushort()
+            elif packet.get_len() == 4:
+                data['data'] = packet.get_uint()
+            data['received'] = True
+
+        self.register_handle(handle, wait_for_notif, res)
+
+        # Start dfu
+        param = datahelper.DataWriter()
+        param.set_ubyte(0x01)
+        param.set_ubyte(0x04)
+        blepacket.write_data_value(handle, dfu_ctrl_handle, param.data)
+
+
+        # Write bin size
+        param = datahelper.DataWriter()
+        param.set_uint(0x00)
+        param.set_uint(0x00)
+        param.set_uint(umsg['file_size'])
+        blepacket.write_data_value(handle, dfu_pkt_handle, param.data, 0x52)
+
+
+
+        # Wait for notification
+        while res['received'] is None:
+            time.sleep(.01)
+
+        if res['value'] != 0x01:
+            logging.error('Size not validated validated [%d][%d][%d]',
+                          res['reqoc'],
+                          res['repoc'],
+                          res['value'])
+            return
+        logging.warning('size of the file has been validated [%d][%d][%d]',
+                        res['reqoc'],
+                        res['repoc'],
+                        res['value'])
+
+        # Enable notification each 20 pkt
+        # param = datahelper.DataWriter()
+        # param.set_ubyte(0x08)
+        # param.set_ubyte(20)
+        # blepacket.write_data_value(handle, dfu_ctrl_handle, param.data)
+
+        # Start transmission
+        blepacket.write_ubyte_value(handle, dfu_ctrl_handle, 0x3)
+
+        # Begin transfert
+        widgets = [
+            'Something: ',
+            progressbar.Percentage(),
+            ' ',
+            progressbar.Bar(marker = '-'),
+            ' ',
+            progressbar.ETA()
+        ]
+        pbar = progressbar.ProgressBar(widgets=widgets, maxval=umsg['file_size'])
+        bytes_send = 0
+        with open(umsg['file'], 'rb') as f:
+            pbar.start()
+            pkt_send = 0
+            res = { 'received' : None }
+            for i in range((umsg['file_size'] / 20) + 1):
+                if pkt_send == 0:
+                    res['received'] = None
+                    self.register_handle(handle, wait_for_notif, res)
+
+                data = f.read(20)
+                blepacket.write_data_value(handle,
+                                           dfu_pkt_handle,
+                                           data,
+                                           0x52)
+
+                bytes_send += len(data)
+                pkt_send += 1
+                time.sleep(.02)
+                if pkt_send == 20:
+                    res = { 'received' : None }
+                    self.register_handle(handle, wait_for_notif, res)
+                    blepacket.write_ubyte_value(handle, dfu_ctrl_handle, 0x07)
+                    while res['received'] is None:
+                        pass
+                    pkt_send = 0
+                    if res['data'] != bytes_send:
+                        logging.error('DFU Target don\' have receive all the packet [%d][%d]',
+                                      res['data'],
+                                      bytes_send)
+                    else:
+                        pbar.update(bytes_send)
+
+
+            pbar.finish()
+
+        res = { 'received' : None }
+        self.register_handle(handle, wait_for_notif, res)
+        blepacket.write_ubyte_value(handle, dfu_ctrl_handle, 0x07)
+        while res['received'] is None:
+            time.sleep(.01)
+        if res['repoc'] == 0x3 and res['value'] == 0x1:
+            logging.error('DFU Target said us that all is alright')
+
+        elif res['data'] != umsg['file_size']:
+            logging.error('DFU Target don\' have receive all the packet [%d][%d]',
+                          res['data'],
+                          umsg['file_size'])
+            return
+
+        logging.warning('DFU Target agree to have received all the firmware')
+
+        # Start validation
+        res = { 'received' : None }
+        self.register_handle(handle, wait_for_notif, res)
+
+        blepacket.write_ubyte_value(handle, dfu_ctrl_handle, 0x4)
+
+
+        # Wait for notification
+        while res['received'] is None:
+            time.sleep(.01)
+
+        if res['value'] != 0x01:
+            logging.error('Firmware not validated [%d][%d][%d]',
+                          res['reqoc'],
+                          res['repoc'],
+                          res['value'])
+            return
+        logging.warning('Firmware has been validated [%d][%d][%d]',
+                        res['reqoc'],
+                        res['repoc'],
+                        res['value'])
+
+
+        # Start activation
+        blepacket.write_ubyte_value(handle, dfu_ctrl_handle, 0x5)
+
+        logging.warning('DFU Target try to reboot')
+	time.sleep(20)
+
     def send_umsg(self, umsg):
 
         dest_info = self._get_dest_info(umsg['dest_id'])
@@ -628,6 +850,9 @@ class uBleDriver(udriver.uDriver):
 
             if umsg['action'] == 'infos':
                 self._act_infos(umsg, result, blepacket)
+
+            if umsg['action'] == 'dfu':
+                self._act_dfu(umsg, result, blepacket)
         except Exception, e:
             logging.exception(e)
 
