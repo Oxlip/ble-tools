@@ -14,18 +14,19 @@ import ctypes.util
 
 class BleUUID(object):
 
-    UUID_BUTTON = '\x00\x00\x15\x24\x12\x12\xef\xde\x15\x23\x78\x5f\xea\xbc\xd1\x23'
-    UUID_LED    = '\x00\x00\x15\x25\x12\x12\xef\xde\x15\x23\x78\x5f\xea\xbc\xd1\x23'
-    UUID_DFU_PACKET = '\x00\x00\x15\x32\x12\x12\xEF\xDE\x15\x23\x78\x5F\xEA\xBC\xD1\x23'
-    UUID_DFU_CONTROLE = '\x00\x00\x15\x31\x12\x12\xEF\xDE\x15\x23\x78\x5F\xEA\xBC\xD1\x23'
-    UUID_DEVINCE_NAME = 0x2A00
+    DEVINCE_NAME = 0x2A00
+
+    UDEVICE        = '\xC0\xF4\x10\x00\x93\x24\x40\x85\xAB\xA0\x09\x02\xC0\xE8\x95\x0A'
+    UDEVICE_INFOS  = '\xC0\xF4\x10\x01\x93\x24\x40\x85\xAB\xA0\x09\x02\xC0\xE8\x95\x0A'
+    UDEVICE_OUTLET = '\xC0\xF4\x10\x02\x93\x24\x40\x85\xAB\xA0\x09\x02\xC0\xE8\x95\x0A'
+    UDEVICE_SENSOR = '\xC0\xF4\x10\x03\x93\x24\x40\x85\xAB\xA0\x09\x02\xC0\xE8\x95\x0A'
 
     knowed_uuid = {
-        UUID_DEVINCE_NAME : 'UUID_DEVINCE_NAME',
-        UUID_BUTTON       : 'UUID_BUTTON',
-        UUID_LED          : 'UUID_LED',
-        UUID_DFU_PACKET   : 'UUID_DFU_PACKET',
-        UUID_DFU_CONTROLE : 'UUID_DFU_CONTROLE'
+        DEVINCE_NAME : 'DEVINCE_NAME',
+        UDEVICE : 'uDevice',
+        UDEVICE_INFOS  : 'uDevice Infos',
+        UDEVICE_OUTLET : 'uDevice Outlet',
+        UDEVICE_SENSOR : 'uDevice Sensor',
     }
 
     def __init__(self, raw):
