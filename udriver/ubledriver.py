@@ -11,6 +11,7 @@ import ctypes
 import thread
 import time
 import ctypes.util
+import bleevent
 
 class BleUUID(object):
 
@@ -299,32 +300,15 @@ class uBlePacketSend(datahelper.DataWriter):
         self.set_ubyte(len(param.data))
         self.set_data(param.data)
 
-        res = {}
-        res['connected'] = None
-
-        def result(status, data, packet):
-            if status == 0x0 and packet.event_type == 0x0F:
-                self.driver.register_cmd(uBleType.CMD_OPCODE_CREATE_CONN,
-                                         result,
-                                         data)
-            elif packet.event_type == 0x3e and  packet.sub_event == 0x01:
-                data['handle'] = packet.handle
-                data['packet'] = packet
-                data['connected'] = True
-            else:
-                logging.error('Command Disallowed')
-                data['connected'] = False
-
-
-        self.driver.register_cmd(uBleType.CMD_OPCODE_CREATE_CONN,
-                                 result,
-                                 res)
         self.send()
 
-        while res['connected'] is None:
-            time.sleep(1)
+        opt = { 'handle' : uBleType.CMD_OPCODE_CREATE_CONN }
+        bleevent.wait_for_event(options = opt, debug = True)
 
-        return False if not res['connected'] else res
+
+        self.disconnect()
+        sys.exit(1)
+        return False
 
 
     def __init__(self, umsg, to, sock, driver):
@@ -364,6 +348,7 @@ class uBlePacketRecv(datahelper.DataReader):
         status = self.get_ubyte()
         self.get_ubyte()
         cmd    = self.get_ushort()
+        bleevent.manager.notify(self)
         self._driver.notify_cmd_status(cmd, status, self)
 
     def _parse_le_meta(self):
@@ -373,6 +358,7 @@ class uBlePacketRecv(datahelper.DataReader):
             self.status = self.get_ubyte()
             self.handle = self.get_ushort()
             # some stuff remaining
+            bleevent.manager.notify(self)
             self._driver.notify_cmd_status(uBleType.CMD_OPCODE_CREATE_CONN,
                                            self.status,
                                            self)
