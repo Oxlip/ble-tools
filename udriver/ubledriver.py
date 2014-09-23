@@ -21,6 +21,10 @@ class BleUUID(object):
     UDEVICE_OUTLET = '\xC0\xF4\x10\x02\x93\x24\x40\x85\xAB\xA0\x09\x02\xC0\xE8\x95\x0A'
     UDEVICE_SENSOR = '\xC0\xF4\x10\x03\x93\x24\x40\x85\xAB\xA0\x09\x02\xC0\xE8\x95\x0A'
 
+    DFU            = '\xC0\xF4\x16\x64\x93\x24\x40\x85\xAB\xA0\x09\x02\xC0\xE8\x95\x0A'
+    DFU_PACKET     = '\xC0\xF4\x16\x65\x93\x24\x40\x85\xAB\xA0\x09\x02\xC0\xE8\x95\x0A'
+    DFU_CONTROLE   = '\xC0\xF4\x16\x66\x93\x24\x40\x85\xAB\xA0\x09\x02\xC0\xE8\x95\x0A'
+
     knowed_uuid = {
         DEVINCE_NAME : 'DEVINCE_NAME',
         UDEVICE : 'uDevice',
@@ -597,24 +601,6 @@ class uBleDriver(udriver.uDriver):
                                                      char['handle'])
                         logging.warning('{uuid}: {value}'.format(uuid = char['uuid'],
                                                                  value = value))
-                        if char['uuid'].raw == BleUUID.UUID_LED:
-                            blepacket.write_ubyte_value(result['handle'],
-                                                        char['handle'],
-                                                        1)
-                            time.sleep(2)
-                            blepacket.write_ubyte_value(result['handle'],
-                                                        char['handle'],
-                                                        0)
-
-    def _act_led(self, umsg, result, blepacket):
-        led = blepacket.get_char_for_group(result['handle'],
-                                           0x0001,
-                                           0xFFFF,
-                                           uuid = BleUUID.UUID_LED)
-        blepacket.write_ubyte_value(result['handle'],
-                                    led[0][0][0],
-                                    1)
-        time.sleep(2)
 
 
     def _act_infos(self, umsg, result, blepacket):
@@ -660,12 +646,12 @@ class uBleDriver(udriver.uDriver):
         dfu_ctrl = blepacket.get_char_for_group(result['handle'],
                                                 0x0001,
                                                 0xFFFF,
-                                                uuid = BleUUID.UUID_DFU_CONTROLE,
+                                                uuid = BleUUID.DFU_CONTROLE,
                                                 get_err = True)
         dfu_pkt = blepacket.get_char_for_group(result['handle'],
                                                0x0001,
                                                0xFFFF,
-                                               uuid = BleUUID.UUID_DFU_PACKET,
+                                               uuid = BleUUID.DFU_PACKET,
                                                get_err = True)
 
         # We are not able to read, but the handle is in error responce :)
@@ -845,9 +831,6 @@ class uBleDriver(udriver.uDriver):
         try:
             if umsg['action'] == 'disc':
                 self._act_discovery(result, blepacket)
-
-            if umsg['action'] == 'led':
-                self._act_led(umsg, result, blepacket)
 
             if umsg['action'] == 'infos':
                 self._act_infos(umsg, result, blepacket)
