@@ -640,6 +640,22 @@ class uBleDriver(udriver.uDriver):
             return None
         return self._dest_available[dest_id]
 
+    def _act_outlet_get_power(self, umsg, result, blepacket):
+        handle = result['handle']
+        outlet_pkt = blepacket.get_char_for_group(handle,
+                                                  0x0001,
+                                                  0xFFFF,
+                                                  uuid = BleUUID.UDEVICE_OUTLET,
+                                                  get_err = True)
+
+        #enable notif
+        outlet_pkt.get_ubyte()
+        outlet_handle = outlet_pkt.get_ushort()
+        blepacket.write_ushort_value(handle, outlet_handle + 1, 0x0001)
+        blepacket.write_ushort_value(handle, outlet_handle, 0x0001)
+
+        time.sleep(2)
+
     def _act_dfu(self, umsg, result, blepacket):
         time.sleep(1)
         handle = result['handle']
@@ -837,6 +853,9 @@ class uBleDriver(udriver.uDriver):
 
             if umsg['action'] == 'dfu':
                 self._act_dfu(umsg, result, blepacket)
+
+            if umsg['action'] == 'outlet':
+                self._act_outlet_get_power(umsg, result, blepacket)
         except Exception, e:
             logging.exception(e)
 
