@@ -27,14 +27,22 @@ def get_umsg_for_dim(args):
     }
 
     umsg['uuid'] = ubledriver.BleUUID.UDEVICE_OUTLET
-
     umsg['value'] = (int(args.power) << 8) + 0x01
 
     return umsg
 
 
 def get_umsg_for_consume(args):
-    return {}
+    umsg = {
+        'dest_id' : args.serial,
+        'action'  : 'write',
+        'notif'   : True
+    }
+
+    umsg['uuid'] = ubledriver.BleUUID.UDEVICE_OUTLET
+    umsg['value'] = 0x0102
+
+    return umsg
 
 def main():
     args = process_command_line()

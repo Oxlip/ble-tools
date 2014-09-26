@@ -837,6 +837,8 @@ class uBleDriver(udriver.uDriver):
 
         #enable notif
         outlet_handle = outlet_pkt[0][0][0]
+        if 'notif' in umsg:
+            blepacket.write_ushort_value(handle, outlet_handle + 1, 0x0001)
         blepacket.write_ushort_value(handle, outlet_handle, umsg['value'])
 
         time.sleep(2)
