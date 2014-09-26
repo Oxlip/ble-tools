@@ -649,8 +649,7 @@ class uBleDriver(udriver.uDriver):
                                                   get_err = True)
 
         #enable notif
-        outlet_pkt.get_ubyte()
-        outlet_handle = outlet_pkt.get_ushort()
+        outlet_handle = outlet_pkt[0][0][0]
         blepacket.write_ushort_value(handle, outlet_handle + 1, 0x0001)
         blepacket.write_ushort_value(handle, outlet_handle, 0x0001)
 
@@ -828,6 +827,22 @@ class uBleDriver(udriver.uDriver):
         logging.warning('DFU Target try to reboot')
 	time.sleep(20)
 
+    def _act_write(self, umsg, result, blepacket):
+        handle = result['handle']
+        outlet_pkt = blepacket.get_char_for_group(handle,
+                                                  0x0001,
+                                                  0xFFFF,
+                                                  uuid = umsg['uuid'],
+                                                  get_err = True)
+
+        #enable notif
+        outlet_handle = outlet_pkt[0][0][0]
+        blepacket.write_ushort_value(handle, outlet_handle, umsg['value'])
+
+        time.sleep(2)
+
+
+
     def send_umsg(self, umsg):
 
         dest_info = self._get_dest_info(umsg['dest_id'])
@@ -853,6 +868,9 @@ class uBleDriver(udriver.uDriver):
 
             if umsg['action'] == 'dfu':
                 self._act_dfu(umsg, result, blepacket)
+
+            if umsg['action'] == 'write':
+                self._act_write(umsg, result, blepacket)
 
             if umsg['action'] == 'outlet':
                 self._act_outlet_get_power(umsg, result, blepacket)
