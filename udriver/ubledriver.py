@@ -128,38 +128,32 @@ class uBlePacketSend(datahelper.DataWriter):
             time.sleep(1)
 
 
-    def find_info(self, handle, hfrom = 0x0001):
-        self.set_ubyte(0x02)
-        self.set_ushort(handle)
-        self.set_ushort(9)
-        self.set_ushort(5)
-        self.set_ushort(4)
-        self.set_ubyte(0x4)
-        self.set_ushort(hfrom)
-        self.set_ushort(0xffff)
+    def find_info(self, hfrom = 0x0001):
 
-        res = {}
-        res['ended'] = None
-        res['attributes'] = []
+        def forge_find_info(self, hfrom = 0x0001):
+            self.set_ubyte(0x02)
+            self.set_ushort(self.handle)
+            self.set_ushort(9)
+            self.set_ushort(5)
+            self.set_ushort(4)
+            self.set_ubyte(0x4)
+            self.set_ushort(hfrom)
+            self.set_ushort(0xffff)
 
-        def result(packet, data):
-            if packet.opcode == 0x5:
-                data['attributes'] += packet.attributes
-                data['attributes'] += self.find_info(packet.handle, packet.attributes[-1][0] + 1)
-            data['ended'] = True
-
-        self.driver.register_handle(handle,
-                                    result,
-                                    res)
-
+        opt = { 'handle' : self.handle }
+        forge_find_info(self)
         self.send()
+        attributes = []
 
-        while res['ended'] is None:
-            time.sleep(.1)
+        responce = bleevent.wait_for_event(options = opt, debug = True)
 
-        return res['attributes']
+        while responce is not None and responce.opcode == 0x5:
+            attributes += responce.attributes
+            forge_find_info(self, responce.attributes[-1][0] + 1)
+            self.send()
+            responce = bleevent.wait_for_event(options = opt, debug = True)
 
-
+        return attributes
 
 
     def read_value(self, handle, char_handle):
@@ -232,11 +226,11 @@ class uBlePacketSend(datahelper.DataWriter):
         return res['result']
 
 
-    def disconnect(self, handle):
+    def disconnect(self):
         self.set_ubyte(uBleType.PKT_TYPE_HCI_CMD)
         self.set_ushort(0x0406)
         self.set_ubyte(0x03)
-        self.set_ushort(handle)
+        self.set_ushort(self.handle)
         self.set_ubyte(0x13)
         self.send()
 
@@ -277,7 +271,7 @@ class uBlePacketSend(datahelper.DataWriter):
         return res['result']
 
 
-    def _connect(self):
+    def connect(self):
         self.set_ubyte(uBleType.PKT_TYPE_HCI_CMD)
         self.set_ushort(uBleType.CMD_OPCODE_CREATE_CONN)
         param = datahelper.DataWriter()
@@ -302,14 +296,20 @@ class uBlePacketSend(datahelper.DataWriter):
 
         self.send()
 
-        opt = { 'handle' : uBleType.CMD_OPCODE_CREATE_CONN }
-        bleevent.wait_for_event(options = opt, debug = True)
+        opt_result = { 'event_type' : 0x3e }
+        opt = { 'cmd_opcode' : uBleType.CMD_OPCODE_CREATE_CONN }
+        responce = bleevent.wait_for_event(options = opt, debug = True)
 
+        if responce.status != 0x0:
+            logging.error('Ble stack not accept the connection')
+            return False
 
-        self.disconnect()
-        sys.exit(1)
-        return False
-
+        responce = bleevent.wait_for_event(options = opt_result, debug = True)
+        if responce is None:
+            #Send creation cancel
+            return False
+        self.handle = responce.handle
+        return True
 
     def __init__(self, umsg, to, sock, driver):
         super(uBlePacketSend, self).__init__()
@@ -318,8 +318,6 @@ class uBlePacketSend(datahelper.DataWriter):
         self.sender   = sock
         self.driver   = driver
 
-    def connect(self):
-        return self._connect()
 
 class uBlePacketRecv(datahelper.DataReader):
 
@@ -345,11 +343,10 @@ class uBlePacketRecv(datahelper.DataReader):
 
 
     def _parse_cmd_status(self):
-        status = self.get_ubyte()
+        self.status = self.get_ubyte()
         self.get_ubyte()
-        cmd    = self.get_ushort()
+        self.cmd_opcode = self.get_ushort()
         bleevent.manager.notify(self)
-        self._driver.notify_cmd_status(cmd, status, self)
 
     def _parse_le_meta(self):
         self.sub_event = self.get_ubyte()
@@ -359,9 +356,6 @@ class uBlePacketRecv(datahelper.DataReader):
             self.handle = self.get_ushort()
             # some stuff remaining
             bleevent.manager.notify(self)
-            self._driver.notify_cmd_status(uBleType.CMD_OPCODE_CREATE_CONN,
-                                           self.status,
-                                           self)
         elif self.sub_event == 0x02:
             data = ''
             num_report = self.get_ubyte()
@@ -402,10 +396,10 @@ class uBlePacketRecv(datahelper.DataReader):
         self.opcode = self.get_ubyte()
 
         if self.opcode == 0x01:
-            self._driver.notify_handle_status(self.handle, self)
+            bleevent.manager.notify(self)
             return
         elif self.opcode == 0x1B:
-            self._driver.notify_handle_status(self.handle, self)
+            bleevent.manager.notify(self)
             return
         elif not self.opcode in self.packet_types:
             logging.info('Opcode %s not implemented', hex(self.opcode))
@@ -430,7 +424,8 @@ class uBlePacketRecv(datahelper.DataReader):
             else:
                 uuid = BleUUID(self.get_data(16)[::-1])
             self.attributes.append((handle, uuid))
-        self._driver.notify_handle_status(self.handle, self)
+        bleevent.manager.notify(self)
+       
 
     def _parse_read_by_type(self):
         self.att_len = self.get_ubyte()
@@ -589,8 +584,8 @@ class uBleDriver(udriver.uDriver):
                                                                  value = value))
 
 
-    def _act_infos(self, umsg, result, blepacket):
-        infos = blepacket.find_info(result['handle'])
+    def _act_infos(self, umsg, blepacket):
+        infos = blepacket.find_info()
 
         board = { 'services' : [] }
 
@@ -843,27 +838,21 @@ class uBleDriver(udriver.uDriver):
                                    addr_mac,
                                    self._sock,
                                    self)
-        result  = blepacket.connect()
-        if not result:
+        if not blepacket.connect():
             return False
 
         try:
-            if umsg['action'] == 'disc':
-                self._act_discovery(result, blepacket)
-
             if umsg['action'] == 'infos':
-                self._act_infos(umsg, result, blepacket)
+                self._act_infos(umsg, blepacket)
 
             if umsg['action'] == 'dfu':
-                self._act_dfu(umsg, result, blepacket)
+                self._act_dfu(umsg, blepacket)
 
             if umsg['action'] == 'write':
-                self._act_write(umsg, result, blepacket)
+                self._act_write(umsg, blepacket)
 
-            if umsg['action'] == 'outlet':
-                self._act_outlet_get_power(umsg, result, blepacket)
         except Exception, e:
             logging.exception(e)
 
-        blepacket.disconnect(result['handle'])
+        blepacket.disconnect()
         return True

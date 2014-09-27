@@ -1,5 +1,6 @@
 import logging
 import threading
+import time
 
 class BleEvent(object):
 
@@ -7,8 +8,8 @@ class BleEvent(object):
         self.options = options
         self.callback = callback
         self.debug = debug
-        self.lock  = threading.Lock()
-        self.lock.acquire()
+        self.event = threading.Event()
+        self.event.clear()
         self.obj = None
 
     def notify(self, obj):
@@ -23,11 +24,12 @@ class BleEvent(object):
                 self.callback(obj)
             else:
                 self.obj = obj
-                self.lock.release()
+                self.event.set()
             return True
         except Exception, e:
             if self.debug:
                 logging.exception(e)
+                logging.error(dir(obj))
             return False
                     
 
@@ -45,10 +47,10 @@ class BleEventManager(object):
         self.events.append(event)
 
     def notify(self, obj):
-        is_taken = False
+        event_count = len(self.events)
         for event in self.events:
-            is_taken |= event.notify(obj)
-        if not is_taken:
+            self.events = [ x for x in self.events if not event.notify(obj) ]
+        if len(self.events) == event_count:
             self.miss_events.append((time.time(), obj))
 
 
@@ -57,5 +59,5 @@ manager = BleEventManager()
 def wait_for_event(options = None, timeout = 10, debug = False):
     event = BleEvent(options, debug = debug)
     manager.register(event)
-    event.lock.acquire()
+    event.event.wait(timeout)
     return event.obj
