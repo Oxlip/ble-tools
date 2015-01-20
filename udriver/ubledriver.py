@@ -300,7 +300,7 @@ class uBlePacketSend(datahelper.DataWriter):
         opt = { 'cmd_opcode' : uBleType.CMD_OPCODE_CREATE_CONN }
         responce = bleevent.wait_for_event(options = opt, debug = True)
 
-        if responce.status != 0x0:
+        if not responce or responce.status != 0x0:
             logging.error('Ble stack not accept the connection')
             return False
 
@@ -609,7 +609,7 @@ class uBleDriver(udriver.uDriver):
             else:
                 char['value'] = infojson
         board['services'].append(service)
-        print json.dumps(board, sort_keys=True, indent=4)
+        return board
 
 
     _dest_available = {
