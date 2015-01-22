@@ -1,5 +1,6 @@
 #!/bin/env python
 
+import json
 import tools
 import logging
 from  udriver import ubledriver
@@ -20,8 +21,11 @@ def main():
     umsg = { 'dest_id' : '#fake_serial', 'action' : 'infos' }
 #    umsg = { 'action' : 'led', 'on' : True }
 
-    if not driver.send_umsg(umsg):
-        logging.error('Unable to found dest %s', umsg['dest_id'])
+    res = driver.send_umsg(umsg)
+    if res is False:
+       logging.error('Unable to found dest %s', umsg['dest_id'])
+    else:
+       print json.dumps(res, sort_keys=True, indent=4)
 
 if __name__ == '__main__':
     main()

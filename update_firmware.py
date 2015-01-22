@@ -32,7 +32,7 @@ def main():
     umsg['file_size'] = file_stat.st_size
 
     if not driver.send_umsg(umsg):
-        logging.error('Unable to found dest %s', umsg['dest_id'])
+        logging.error('Unable to send msg to the dest %s', umsg['dest_id'])
 
 if __name__ == '__main__':
     main()

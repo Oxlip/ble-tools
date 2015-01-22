@@ -4,20 +4,32 @@ import time
 
 class BleEvent(object):
 
-    def __init__(self, options, callback = None, debug = False):
+    def __init__(self, options, callback = None, debug = False, opcode = None):
         self.options = options
         self.callback = callback
         self.debug = debug
         self.event = threading.Event()
         self.event.clear()
+        self.opcode = opcode
         self.obj = None
 
     def notify(self, obj):
+        # check if the pkt is an error responce
+        try:
+           if getattr(obj, 'opcode') == 0x01:
+              if getattr(obj, 'req_opcode') == self.opcode:
+                 self.obj = obj
+                 self.event.set()
+                 return True
+        except:
+           pass
+
         try:
             for field, value in self.options.iteritems():
-                logging.error('check for obj.%s == %s',
-                              field,
-                              value)
+                if self.debug:
+                   needed = getattr(obj, field)
+                   logging.debug('check for obj.%s, %s == %s',
+                                 field, hex(needed), hex(value))
                 if getattr(obj, field) != value:
                     return False
             if self.callback is not None:
@@ -41,23 +53,23 @@ class BleEventManager(object):
 
     def register(self, event):
         for t, obj in self.miss_events:
-            if time.time() > t + (10 * 1000):
-                if event.notify(obj):
-                    return
+           if event.notify(obj):
+              self.miss_events.remove((t, obj))
+              return
         self.events.append(event)
 
     def notify(self, obj):
         event_count = len(self.events)
-        for event in self.events:
-            self.events = [ x for x in self.events if not event.notify(obj) ]
+        self.events = [ x for x in self.events if not x.notify(obj) ]
         if len(self.events) == event_count:
             self.miss_events.append((time.time(), obj))
+            logging.info('Nb of missing nb %s', len(self.miss_events))
 
 
 manager = BleEventManager()
 
-def wait_for_event(options = None, timeout = 10, debug = False):
-    event = BleEvent(options, debug = debug)
+def wait_for_event(options = None, timeout = 10, debug = False, opcode = None):
+    event = BleEvent(options, debug = debug, opcode = opcode)
     manager.register(event)
     event.event.wait(timeout)
     return event.obj
