@@ -50,20 +50,26 @@ class BleEventManager(object):
     def __init__(self):
         self.events = []
         self.miss_events = []
+        self.lock = threading.Lock()
 
     def register(self, event):
+        self.lock.acquire()
         for t, obj in self.miss_events:
            if event.notify(obj):
               self.miss_events.remove((t, obj))
+              self.lock.release()
               return
         self.events.append(event)
+        self.lock.release()
 
     def notify(self, obj):
+        self.lock.acquire()
         event_count = len(self.events)
         self.events = [ x for x in self.events if not x.notify(obj) ]
         if len(self.events) == event_count:
             self.miss_events.append((time.time(), obj))
-            logging.info('Nb of missing nb %s', len(self.miss_events))
+            logging.info('Add event in the waiting list (%s)', len(self.miss_events))
+        self.lock.release()
 
 
 manager = BleEventManager()

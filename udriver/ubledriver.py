@@ -441,6 +441,7 @@ class uBlePacketRecv(datahelper.DataReader):
             bleevent.manager.notify(self)
             return
         elif self.opcode == 0x1B:
+            logging.debug('Recv notification')
             bleevent.manager.notify(self)
             return
         elif self.opcode == 0x13:
@@ -784,6 +785,8 @@ class uBleDriver(udriver.uDriver):
         logging.info('Start transmission')
         blepacket.write_ubyte_value(dfu_ctrl_handle, 0x3)
 
+        logging.info('Device allow to start the update')
+
         # Begin transfert
         widgets = [
             'Something: ',
@@ -800,24 +803,19 @@ class uBleDriver(udriver.uDriver):
             pkt_send = 0
             res = { 'received' : None }
             for i in range((umsg['file_size'] / 20) + 1):
-                if pkt_send == 20:
-                    # Wait for notification
-                    logging.info('Waiting for validation notification')
-                    opt = { 'opcode' : uBleType.PKT_OPCODE_VALUE_NOTIF }
-                    packet = bleevent.wait_for_event(options = opt)
-
                 data = f.read(20)
                 blepacket.write_data_value(dfu_pkt_handle, data, 0x52)
 
                 bytes_send += len(data)
                 pkt_send += 1
-                time.sleep(.02)
-                if pkt_send == 20:
+                time.sleep(0.03)
+                if pkt_send == 19:
+                    time.sleep(0.03)
                     blepacket.write_ubyte_value(dfu_ctrl_handle, 0x07)
                     # Wait for notification
                     logging.debug('Waiting for validation notification')
                     opt = { 'opcode' : uBleType.PKT_OPCODE_VALUE_NOTIF }
-                    packet = bleevent.wait_for_event(options = opt)
+                    packet = bleevent.wait_for_event(options = opt, timeout = 20)
 
                     pkt_send = 0
                     res = get_notif_data(packet)
@@ -840,7 +838,7 @@ class uBleDriver(udriver.uDriver):
         res = get_notif_data(packet)
 
         if res['repoc'] == 0x3 and res['value'] == 0x1:
-            logging.error('DFU Target said us that all is alright')
+            logging.info('DFU Target said us that all is alright')
 
         elif res['data'] != umsg['file_size']:
             logging.error('DFU Target don\' have receive all the packet [%d][%d]',
@@ -848,7 +846,7 @@ class uBleDriver(udriver.uDriver):
                           umsg['file_size'])
             return
 
-        logging.warning('DFU Target agree to have received all the firmware')
+        logging.info('DFU Target agree to have received all the firmware')
 
         # Start validation
         blepacket.write_ubyte_value(dfu_ctrl_handle, 0x4)
