@@ -37,6 +37,9 @@ class BleUUID(object):
         UDEVICE_INFOS  : 'uDevice Infos',
         UDEVICE_OUTLET : 'uDevice Outlet',
         UDEVICE_SENSOR : 'uDevice Sensor',
+        DFU : 'DFU',
+        DFU_PACKET : 'DFU packet',
+        DFU_CONTROLE : 'DFU control'
     }
 
     def __init__(self, raw):
@@ -194,34 +197,21 @@ class uBlePacketSend(datahelper.DataWriter):
         return attributes
 
 
-    def read_value(self, handle, char_handle):
+    def read_value(self, char_handle):
         self.set_ubyte(0x02)
-        self.set_ushort(handle)
+        self.set_ushort(self.handle)
         self.set_ushort(7)
         self.set_ushort(3)
         self.set_ushort(4)
         self.set_ubyte(0xa)
         self.set_ushort(char_handle)
 
-        res = {}
-        res['ended'] = None
-        res['value'] = None
-
-        def result(packet, data):
-            if packet.opcode == 0xb:
-                data['value'] = packet.value
-            data['ended'] = True
-
-        self.driver.register_handle(handle,
-                                    result,
-                                    res)
-
         self.send()
 
-        while res['ended'] is None:
-            time.sleep(.1)
+        opt = { 'opcode' : 0xb }
+        resp = bleevent.wait_for_event(options = opt)
 
-        return res['value']
+        return resp.value
 
     def get_char_for_group(self, begin, end, uuid = 0x2803, get_err = False):
         self.set_ubyte(0x02)
@@ -270,6 +260,8 @@ class uBlePacketSend(datahelper.DataWriter):
         self.set_ubyte(0x13)
         self.send()
 
+        opt = { 'event_type' : 0x5 }
+        resp = bleevent.wait_for_event(options = opt, opcode = 0x8)
 
     def get_services(self, handle, hfrom = 0x0001):
         self.set_ubyte(0x02)
@@ -387,7 +379,8 @@ class uBlePacketRecv(datahelper.DataReader):
         bleevent.manager.notify(self)
 
     def _parse_disconnect(self):
-        raise Exception('disconnect')
+        logging.info('Board disconnected')
+        bleevent.manager.notify(self)
 
     def _parse_packet_complet(self):
         logging.debug('Packet complet receive')
@@ -465,7 +458,7 @@ class uBlePacketRecv(datahelper.DataReader):
     def _parse_read(self):
         self.value_len = self.data_len - 1
         self.value = self.get_data(self.value_len)
-        self._driver.notify_handle_status(self.handle, self)
+        bleevent.manager.notify(self)
 
     def _parse_find_info(self):
         self.uuid_type = self.get_ubyte()
@@ -631,8 +624,7 @@ class uBleDriver(udriver.uDriver):
                 for _, char in chars[0]:
                     char = self.value_to_char_fmt(char)
                     if char['uuid'].is_know():
-                        value = blepacket.read_value(result['handle'],
-                                                     char['handle'])
+                        value = blepacket.read_value(char['handle'])
                         logging.warning('{uuid}: {value}'.format(uuid = char['uuid'],
                                                                  value = value))
 
@@ -888,9 +880,11 @@ class uBleDriver(udriver.uDriver):
 
         return True
 
-    def _act_write(self, umsg, result, blepacket):
-        handle = result['handle']
-        outlet_pkt = blepacket.get_char_for_group(handle,
+    def _act_read(self, umsg, blepacket):
+        return blepacket.read_value(umsg['handle'])
+
+    def _act_write(self, umsg, blepacket):
+        outlet_pkt = blepacket.get_char_for_group(self.handle,
                                                   0x0001,
                                                   0xFFFF,
                                                   uuid = umsg['uuid'],
@@ -899,12 +893,10 @@ class uBleDriver(udriver.uDriver):
         #enable notif
         outlet_handle = outlet_pkt[0][0][0]
         if 'notif' in umsg:
-            blepacket.write_ushort_value(handle, outlet_handle + 1, 0x0001)
-        blepacket.write_ushort_value(handle, outlet_handle, umsg['value'])
+            blepacket.write_ushort_value(self.handle, outlet_handle + 1, 0x0001)
+        blepacket.write_ushort_value(self.handle, outlet_handle, umsg['value'])
 
         time.sleep(2)
-
-
 
     def send_umsg(self, umsg):
 
@@ -930,6 +922,9 @@ class uBleDriver(udriver.uDriver):
 
             if umsg['action'] == 'dfu':
                 res = self._act_dfu(umsg, blepacket)
+
+            if umsg['action'] == 'read':
+                res = self._act_read(umsg, blepacket)
 
             if umsg['action'] == 'write':
                 res = self._act_write(umsg, blepacket)
