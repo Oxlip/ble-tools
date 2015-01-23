@@ -808,9 +808,7 @@ class uBleDriver(udriver.uDriver):
 
                 bytes_send += len(data)
                 pkt_send += 1
-                time.sleep(0.03)
-                if pkt_send == 19:
-                    time.sleep(0.03)
+                if pkt_send == 10:
                     blepacket.write_ubyte_value(dfu_ctrl_handle, 0x07)
                     # Wait for notification
                     logging.debug('Waiting for validation notification')
@@ -874,7 +872,7 @@ class uBleDriver(udriver.uDriver):
         blepacket.write_ubyte_value(dfu_ctrl_handle, 0x5)
 
         logging.info('DFU Target try to reboot')
-        time.sleep(20)
+        time.sleep(4)
 
         return True
 
